@@ -18,6 +18,7 @@ import com.pux12.springmassinsert.model.User;
 import com.pux12.springmassinsert.repository.UserRepository;
 
 import jakarta.annotation.PostConstruct;
+import jakarta.transaction.Transactional;
 
 @Service
 public class InsertService {
@@ -113,27 +114,29 @@ public class InsertService {
             // Create a prepared statement for inserting users
             PreparedStatement userPs = jdbcTemplate.getDataSource().getConnection()
                     .prepareStatement("insert into users (name) values (?)", Statement.RETURN_GENERATED_KEYS);
-            for (User user : users) {
-                // Set the user name parameter
-                userPs.setString(1, user.getName());
-                // Execute the statement and get the generated user id
-                userPs.executeUpdate();
-                ResultSet rs = userPs.getGeneratedKeys();
-                if (rs.next()) {
-                    user.setId(rs.getLong(1));
-                }
-            }
-
             // Create a prepared statement for inserting emails
             PreparedStatement emailPs = jdbcTemplate.getDataSource().getConnection()
                     .prepareStatement("insert into emails (address, text, user_id) values (?, ?, ?)");
             for (User user : users) {
+                // Set the user name parameter and add to the batch
+                userPs.setString(1, user.getName());
+                userPs.addBatch();
+            }
+            // Execute the batch update for users and get the generated ids
+            userPs.executeBatch();
+            ResultSet rs = userPs.getGeneratedKeys();
+            int index = 0;
+            while (rs.next()) {
+                // Set the user id from the result set
+                users.get(index).setId(rs.getLong(1));
+                index++;
+            }
+            for (User user : users) {
                 for (Email email : user.getEmails()) {
-                    // Set the email parameters
+                    // Set the email parameters and add to the batch
                     emailPs.setString(1, email.getAddress());
                     emailPs.setString(2, email.getText());
                     emailPs.setLong(3, user.getId());
-                    // Add the statement to the batch
                     emailPs.addBatch();
                 }
             }
@@ -145,7 +148,6 @@ public class InsertService {
 
     }
 
-    // PostConstruct: execute benchmark
     @PostConstruct
     public void benchmark() {
         long startTime = System.currentTimeMillis();
@@ -155,7 +157,8 @@ public class InsertService {
                 + (endTime - startTime) + " milliseconds");
         // Print insert per seconds
         System.out
-                .println((NUMBER_OF_USERS * NUMBER_OF_EMAILS * 1.0 / ((endTime - startTime) / 1000.0)) + " inserts per second");
+                .println((NUMBER_OF_USERS * NUMBER_OF_EMAILS * 1.0 / ((endTime - startTime) / 1000.0))
+                        + " inserts per second");
     }
 
 }
